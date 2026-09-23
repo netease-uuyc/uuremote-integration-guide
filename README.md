@@ -223,7 +223,7 @@ startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 第三方 App 通过以下 URL Scheme 发起远控连接：
 
 ```text
-uuremote://external/device/control?anonymous_device_id=<加密设备ID>&window_type=<窗口模式>&callback=<回调URL>
+uuremote://external/device/control?anonymous_device_id=<加密设备ID>&window_type=<窗口模式>[&callback=<回调URL>]
 ```
 
 本接口仅支持通过设备绑定流程获得的 Windows/macOS 设备标识。
@@ -234,26 +234,27 @@ uuremote://external/device/control?anonymous_device_id=<加密设备ID>&window_t
 |------|------|------|------|
 | `anonymous_device_id` | String | 是 | 绑定流程返回的加密设备标识。参数值需进行 URL 编码。 |
 | `window_type` | Int | 否 | 窗口模式：`0` = 全屏，`1` = 画中画小窗；默认值为 `0`。 |
-| `callback` | String | 是 | 第三方 App 的回调 URL，用于接收本次请求的最终结果。参数值需进行 URL 编码。 |
+| `callback` | String | 否 | 第三方 App 的回调 URL。仅小窗模式且传入该参数时，UU 远程才会通过该 URL 回调最终结果；不传不影响发起远控。全屏模式不回调第三方 App。参数值需进行 URL 编码。 |
 
 ### 3.3 窗口模式说明
 
 #### 全屏模式（`window_type=0`）
 
 - UU 远程以全屏方式展示远控画面。
-- 远端首帧成功显示后，本次请求才判定为成功。
-- 成功后 UU 远程回调第三方 App；远控连接在后台保持存活。
-- 用户可手动切回 UU 远程继续查看远控画面。
+- 远端首帧成功显示后，本次请求判定为成功。
+- 无论远控成功或失败，全屏模式都不通过 `callback` 回调第三方 App。
 
 #### 小窗模式（`window_type=1`）
 
 - UU 远程在连接成功后尝试进入画中画（PiP）小窗模式。
-- 只有 PiP 实际启动成功，本次请求才判定为成功并回调 `status=success`。
-- PiP 不可用或启动失败时不降级为成功，UU 远程回调 `status=failure` 及对应 `reason`。
+- 只有 PiP 实际启动成功，本次请求才判定为成功；若传入 `callback`，UU 远程回调 `status=success`。
+- PiP 不可用或启动失败时不降级为成功；若传入 `callback`，UU 远程回调 `status=failure` 及对应 `reason`。
 - iOS 客户端使用小窗模式要求 iOS 18.0 或更高版本，且当前设备支持画中画；不满足要求时返回 `pip_unsupported`。
 - 用户可点击小窗恢复到 UU 远程全屏查看。
 
 ### 3.4 调用示例
+
+以下示例演示需要接收小窗远控结果时的调用方式；不需要回调时，可省略 `callback` 参数。
 
 #### iOS
 
@@ -285,15 +286,15 @@ startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 
 ### 3.5 回调参数
 
-UU 远程在第三方传入的 `callback` URL 上追加结果参数。若 `callback` 已包含查询参数，UU 远程会保留原参数，并追加或覆盖同名的结果字段；连接成功时会同时移除 `callback` 中原有的 `reason`，避免第三方读到上一次的失败原因。
+`callback` 为可选参数。仅小窗模式且请求中传入有效的 `callback` 时，UU 远程才会回调第三方 App；未传入 `callback` 时不回调，也不影响远控流程。全屏模式无论是否传入 `callback`、远控成功或失败都不回调。小窗模式发生回调时，UU 远程在第三方传入的 `callback` URL 上追加结果参数。若 `callback` 已包含查询参数，UU 远程会保留原参数，并追加或覆盖同名的结果字段；成功回调时会同时移除 `callback` 中原有的 `reason`，避免第三方读到上一次的失败原因。
 
-#### 连接成功
+#### 小窗模式连接成功
 
 ```text
 <callback>?status=success
 ```
 
-#### 连接失败
+#### 小窗模式连接失败
 
 ```text
 <callback>?status=failure&reason=<失败原因>
@@ -301,7 +302,7 @@ UU 远程在第三方传入的 `callback` URL 上追加结果参数。若 `callb
 
 | 参数 | 说明 |
 |------|------|
-| `status` | 本次请求的最终状态：`success` 或 `failure`。 |
+| `status` | 小窗远控的最终状态：`success` 或 `failure`。 |
 | `reason` | 失败原因。仅在 `status=failure` 时返回；成功时不返回。 |
 
 #### `reason` 取值
@@ -318,21 +319,24 @@ UU 远程在第三方传入的 `callback` URL 上追加结果参数。若 `callb
 | `connect_timeout` | 建连、等待首帧或启动 PiP 超时 | 提示用户重试 |
 | `connect_failed` | 无法进一步区分的连接失败 | 展示通用连接失败提示并允许重试 |
 | `user_cancel` | 用户取消登录或主动终止本次远控流程 | 结束等待 |
-| `invalid_request` | 除 `callback` 外的必填参数缺失或参数值不合法 | 检查请求参数 |
+| `invalid_request` | 必填参数缺失或参数值不合法 | 检查请求参数 |
 | `internal_error` | UU 远程内部状态异常，无法继续处理请求 | 展示通用失败提示并允许重试 |
 
 ### 3.6 回调约定
 
-- `status=success` 与 `status=failure` 互斥；成功时不返回 `reason`，失败时必须返回非空的 `reason`。
+- 回调仅用于传入有效 `callback` 的小窗模式；`status=success` 与 `status=failure` 互斥，成功时不返回 `reason`，失败时必须返回非空的 `reason`。
 - 不再使用旧版 `success=0/1` 字段。
-- 携带合法 `callback` 的请求最终且只回调一次，包括成功、失败、用户取消和超时。
-- 前置拦截类失败（设备不允许被控、设备不存在、设备离线、当前忙碌）会先在 UU 远程内弹窗提示用户，**用户点击确认后才回调**对应的 `reason`；该路径不启用本地兜底超时，第三方 App 需按用户确认时机处理，不应据此判定回调丢失。若提示弹窗无法展示，UU 远程立即以对应 `reason` 回调。
-- 无需用户确认的失败（参数非法、PiP 启动失败等）会立即回调。
-- 全屏远控以远端首帧成功显示为成功；小窗远控以 PiP 实际启动成功为成功。
+- 全屏模式无论远控成功、失败、用户取消或超时都不回调第三方 App。
+- 小窗模式传入有效 `callback` 时，在成功、失败、用户取消或超时后最终且只回调一次；未传入时不回调。
+- 小窗模式传入有效 `callback` 时，前置拦截类失败（设备不允许被控、设备不存在、设备离线、当前忙碌）会先在 UU 远程内弹窗提示用户，**用户点击确认后才回调**对应的 `reason`；该路径不启用本地兜底超时，第三方 App 需按用户确认时机处理，不应据此判定回调丢失。若提示弹窗无法展示，UU 远程立即以对应 `reason` 回调。
+- 小窗模式传入有效 `callback` 时，无需用户确认的失败（参数非法、PiP 启动失败等）会立即回调。
+- 全屏远控以远端首帧成功显示为成功，但不回调结果；小窗远控以 PiP 实际启动成功为成功，并在传入有效 `callback` 时回调 `status=success`。
 - 第三方 App 收到未知 `reason` 时，应按 `connect_failed` 处理，不应忽略回调。
-- 第三方 App 可保留本地总超时作为异常容灾，但不应依赖它代替正常失败回调；前置拦截路径的等待时长取决于用户在 UU 远程内的确认操作，本地超时应留出足够余量。
+- 第三方 App 不应在全屏模式或未传入 `callback` 时等待回调。传入有效 `callback` 的小窗模式可保留本地总超时作为异常容灾，但不应依赖它代替正常失败回调；前置拦截路径的等待时长取决于用户在 UU 远程内的确认操作，本地超时应留出足够余量。
 
 ### 3.7 iOS 回调接收示例
+
+以下示例处理小窗模式传入 `callback` 后收到的成功和失败回调。全屏模式不会进入该回调处理。
 
 ```swift
 if url.host == "controlresult" {
@@ -359,13 +363,16 @@ if url.host == "controlresult" {
 
 ### 4.1 通用异常
 
+`device/control` 的回调结果仅适用于传入有效 `callback` 的小窗模式。全屏模式的异常由 UU 远程内部展示和处理，不回调第三方 App。
+
 | 场景 | 表现 | 建议处理 |
 |------|------|----------|
 | iOS 未安装 UU 远程 | `canOpenURL` 返回 `false` | 引导用户前往 App Store 安装 |
 | Android 未安装 UU 远程 | Intent 无法解析 | 按接入方既有分发渠道引导用户安装 |
-| `device/control` 或 `device/authorize` 缺少或携带非法 `callback` | 无法建立有效回调通道，不执行该请求且无法回调 | 发起请求前校验并正确编码 `callback` |
+| `device/control` 携带非法 `callback` | 请求参数非法，无法回调 | 如需回调，发起请求前校验并正确编码 `callback`；无需回调时不要传入该参数 |
+| `device/authorize` 缺少或携带非法 `callback` | 同上，绑定流程不执行且无法回调 | 发起请求前校验并正确编码 `callback` |
 | `device/control` 缺少 `anonymous_device_id` | `status=failure&reason=invalid_request` | 确保必填参数完整 |
-| `window_type` 传入非数字或不是 `0`/`1` 的取值 | `status=failure&reason=invalid_request` | 修正窗口模式参数 |
+| `window_type` 不是 `0` 或 `1` | `status=failure&reason=invalid_request` | 修正窗口模式参数 |
 
 ### 4.2 绑定流程异常
 
@@ -382,6 +389,8 @@ if url.host == "controlresult" {
 
 ### 4.3 远控连接异常
 
+下表中的回调仅适用于传入有效 `callback` 的小窗模式。未传入 `callback` 或全屏模式遇到相同异常时不回调第三方 App。
+
 | 场景 | 回调 | 建议处理 |
 |------|------|----------|
 | UU 远程正在远控其他设备 | `status=failure&reason=busy` | 引导用户先结束当前远控 |
@@ -391,13 +400,15 @@ if url.host == "controlresult" {
 | 连接或首帧等待超时 | `status=failure&reason=connect_timeout` | 结束等待并允许用户重试 |
 | 连接失败但无法进一步分类 | `status=failure&reason=connect_failed` | 展示通用连接失败提示 |
 | PiP 不可用 | `status=failure&reason=pip_unsupported` | 改用全屏模式重试 |
-| 登录或首页初始化超时，或排队被触发时登录态/首页条件已不满足 | `status=failure&reason=login_timeout` | 结束等待并允许用户重新发起 |
+| 登录或首页初始化超时 | `status=failure&reason=login_timeout` | 结束等待并允许用户重新发起 |
 | 设备不允许被控，或目标平台不受支持 | `status=failure&reason=not_allowed` | 引导用户检查被控端允许被控设置与设备平台；须用户点击提示弹窗确认后才回调 |
 | 用户取消登录或主动终止本次远控 | `status=failure&reason=user_cancel` | 结束等待 |
-| 除 `callback` 外的必填参数缺失或取值非法 | `status=failure&reason=invalid_request` | 修正请求参数后重试 |
+| 必填参数缺失或取值非法 | `status=failure&reason=invalid_request` | 修正请求参数后重试 |
 | UU 远程内部状态异常 | `status=failure&reason=internal_error` | 展示通用失败提示并允许重试 |
 
 ### 4.4 超时机制
+
+远控超时仅在传入有效 `callback` 的小窗模式下回调第三方 App；未传入 `callback` 或全屏模式不回调。设备绑定流程的超时回调不受此规则影响。
 
 | 超时项 | 时长 | 回调 |
 |--------|------|------|
@@ -414,10 +425,10 @@ if url.host == "controlresult" {
 
 1. **目标设备范围**：仅支持绑定和远控 Windows/macOS 设备，不支持 Android、iOS、TV 等其他平台的被控设备。
 2. **账号绑定关系**：`anonymous_device_id` 与生成该标识时登录的 UU 账号绑定。切换 UU 账号后，旧标识会返回 `device_not_found`。
-3. **回调 URL 编码**：`callback` 和 `anonymous_device_id` 可能包含 `://`、`+`、`=` 等 URL 特殊字符，必须进行 URL 编码后再拼接。
-4. **回调原参数**：`device/control`（以及 `device/authorize`）会保留 `callback` 原有查询参数，并追加本次结果；同名的结果字段以本次结果为准，且远控成功时会移除原有 `reason`。
+3. **回调 URL 编码**：传入 `callback` 时，`callback` 和 `anonymous_device_id` 可能包含 `://`、`+`、`=` 等 URL 特殊字符，必须进行 URL 编码后再拼接。
+4. **回调原参数**：`device/control`（以及 `device/authorize`）发生回调时会保留 `callback` 原有查询参数，并追加本次结果；同名的结果字段以本次结果为准，且小窗模式远控成功时会移除原有 `reason`。
 5. **重复绑定**：同一第三方 App 可多次调用绑定接口。第三方 App 应保存最新的 `anonymous_device_id`。被后发请求取代的绑定请求会收到 `error=superseded`。
-6. **并发请求**：请勿同时发起多个绑定或远控请求。UU 远程同一时刻仅处理一个第三方请求，被替换或取消的远控请求也会收到一次失败回调；绑定请求被取代或落选时回调 `error=superseded`。
+6. **并发请求**：请勿同时发起多个绑定或远控请求。UU 远程同一时刻仅处理一个第三方请求；传入有效 `callback` 的小窗远控请求被替换或取消时会收到一次失败回调，未传入 `callback` 的小窗请求和全屏远控请求不回调；绑定请求被取代或落选时回调 `error=superseded`。
 7. **错误码粒度**：`internal_error` 是端内异常的兜底错误码，具体内部原因（加密失败、页面栈缺失、无可用展示宿主等）不会透出给第三方，第三方只需按通用失败处理。
 
 ---
@@ -439,9 +450,17 @@ if url.host == "controlresult" {
 ### 远控协议
 
 ```text
--> uuremote://external/device/control?anonymous_device_id={encrypted_id}&window_type={0|1}&callback={url}
+-> uuremote://external/device/control?anonymous_device_id={encrypted_id}&window_type={0|1}[&callback={url}]
+
+window_type=0（全屏）：
+<- 不回调
+
+window_type=1（小窗，传入 callback 时）：
 <- {callback}?status=success
 <- {callback}?status=failure&reason={reason}
+
+window_type=1（小窗，未传入 callback 时）：
+<- 不回调
 ```
 
 远控目标设备：仅 Windows/macOS。
